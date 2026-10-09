@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LED Clock</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', Courier, 'Lucida Console', monospace;
+      overflow: hidden;
+    }
+
+    /* Subtle radial glow behind the clock */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 40% at 50% 50%, rgba(180,0,0,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .clock-panel {
+      background: #111;
+      border: 1px solid #2a0000;
+      border-radius: 18px;
+      padding: 48px 56px 40px;
+      box-shadow:
+        0 0 0 1px #1a0000,
+        0 0 40px rgba(200,0,0,0.15),
+        0 0 80px rgba(200,0,0,0.08),
+        inset 0 1px 0 rgba(255,255,255,0.03);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 32px;
+    }
+
+    /* ─── 7-SEGMENT TIME DISPLAY ─── */
+    .time-display {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .digit-group {
+      display: flex;
+      gap: 20px;
+    }
+
+    /* Each digit is a 2×3 grid of segments */
+    .digit {
+      position: relative;
+      width: 104px;
+      height: 192px;
+    }
+
+    /* All seven segments */
+    .seg {
+      position: absolute;
+      background: #1a0000;
+      border-radius: 3px;
+      transition: background 0.06s, box-shadow 0.06s;
+    }
+
+    /* Horizontal segments */
+    .seg.h {
+      width: 76px;
+      height: 18px;
+      left: 14px;
+    }
+    .seg.top    { top: 0; }
+    .seg.mid    { top: 86px; }
+    .seg.bot    { top: 174px; }
+
+    /* Vertical segments */
+    .seg.v {
+      width: 18px;
+      height: 68px;
+      border-radius: 4px;
+    }
+    .seg.tl { top: 16px;  left: 0; }
+    .seg.tr { top: 16px;  right: 0; }
+    .seg.bl { top: 106px; left: 0; }
+    .seg.br { top: 106px; right: 0; }
+
+    /* Active segment glow */
+    .seg.on {
+      background: #ff1a00;
+      box-shadow:
+        0 0 6px #ff1a00,
+        0 0 14px rgba(255,26,0,0.7),
+        0 0 30px rgba(255,26,0,0.3);
+    }
+
+    /* Colon separator */
+    .colon {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 44px;
+      padding: 0 8px;
+      padding-bottom: 8px;
+    }
+
+    .colon-dot {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #1a0000;
+      transition: background 0.06s, box-shadow 0.06s;
+    }
+
+    .colon-dot.on {
+      background: #ff1a00;
+      box-shadow:
+        0 0 10px #ff1a00,
+        0 0 24px rgba(255,26,0,0.7);
+    }
+
+    /* ─── DOT-MATRIX DATE DISPLAY ─── */
+    .date-display {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .date-label {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: #3a0000;
+      text-transform: uppercase;
+    }
+
+    .dot-matrix {
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+    /* Each character cell: 5 cols × 7 rows of dots */
+    .dm-char {
+      display: grid;
+      grid-template-columns: repeat(5, 6px);
+      grid-template-rows: repeat(7, 6px);
+      gap: 2px;
+    }
+
+    .dm-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #1a0000;
+      transition: background 0.06s, box-shadow 0.06s;
+    }
+
+    .dm-dot.on {
+      background: #ff2200;
+      box-shadow:
+        0 0 3px #ff2200,
+        0 0 8px rgba(255,34,0,0.6);
+    }
+
+    /* Spacer between date parts */
+    .dm-space {
+      width: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="clock-panel">
+    <div class="time-display" id="timeDisplay"></div>
+    <div class="date-display">
+      <div class="date-label">Date</div>
+      <div class="dot-matrix" id="dateDisplay"></div>
+    </div>
+  </div>
+
+  <script>
+    // ─── 7-SEGMENT DEFINITIONS ───────────────────────────────────────────────
+    // Segments: top, tl, tr, mid, bl, br, bot
+    const SEG7 = {
+      '0': [1,1,1,0,1,1,1],
+      '1': [0,0,1,0,0,1,0],
+      '2': [1,0,1,1,1,0,1],
+      '3': [1,0,1,1,0,1,1],
+      '4': [0,1,1,1,0,1,0],
+      '5': [1,1,0,1,0,1,1],
+      '6': [1,1,0,1,1,1,1],
+      '7': [1,0,1,0,0,1,0],
+      '8': [1,1,1,1,1,1,1],
+      '9': [1,1,1,1,0,1,1],
+    };
+
+    // ─── 5×7 DOT MATRIX FONT ─────────────────────────────────────────────────
+    // Each char: array of 7 rows, each row is 5 bits (MSB=left)
+    const DOTMATRIX = {
+      '0': [0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110],
+      '1': [0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],
+      '2': [0b01110,0b10001,0b00001,0b00010,0b00100,0b01000,0b11111],
+      '3': [0b11111,0b00010,0b00100,0b00010,0b00001,0b10001,0b01110],
+      '4': [0b00010,0b00110,0b01010,0b10010,0b11111,0b00010,0b00010],
+      '5': [0b11111,0b10000,0b11110,0b00001,0b00001,0b10001,0b01110],
+      '6': [0b00110,0b01000,0b10000,0b11110,0b10001,0b10001,0b01110],
+      '7': [0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],
+      '8': [0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],
+      '9': [0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
+      'J': [0b00111,0b00010,0b00010,0b00010,0b10010,0b10010,0b01100],
+      'A': [0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
+      'N': [0b10001,0b11001,0b10101,0b10011,0b10001,0b10001,0b10001],
+      'F': [0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b10000],
+      'E': [0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b11111],
+      'B': [0b11110,0b10001,0b10001,0b11110,0b10001,0b10001,0b11110],
+      'M': [0b10001,0b11011,0b10101,0b10001,0b10001,0b10001,0b10001],
+      'R': [0b11110,0b10001,0b10001,0b11110,0b10100,0b10010,0b10001],
+      'P': [0b11110,0b10001,0b10001,0b11110,0b10000,0b10000,0b10000],
+      'O': [0b01110,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],
+      'V': [0b10001,0b10001,0b10001,0b10001,0b10001,0b01010,0b00100],
+      'C': [0b01110,0b10001,0b10000,0b10000,0b10000,0b10001,0b01110],
+      'T': [0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b00100],
+      'D': [0b11100,0b10010,0b10001,0b10001,0b10001,0b10010,0b11100],
+      'G': [0b01110,0b10001,0b10000,0b10111,0b10001,0b10001,0b01111],
+      'H': [0b10001,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
+      'I': [0b01110,0b00100,0b00100,0b00100,0b00100,0b00100,0b01110],
+      'L': [0b10000,0b10000,0b10000,0b10000,0b10000,0b10000,0b11111],
+      'S': [0b01110,0b10001,0b10000,0b01110,0b00001,0b10001,0b01110],
+      'U': [0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],
+      'W': [0b10001,0b10001,0b10001,0b10101,0b10101,0b11011,0b10001],
+      'Y': [0b10001,0b10001,0b01010,0b00100,0b00100,0b00100,0b00100],
+      'Z': [0b11111,0b00001,0b00010,0b00100,0b01000,0b10000,0b11111],
+      '-': [0b00000,0b00000,0b00000,0b11111,0b00000,0b00000,0b00000],
+      ' ': [0b00000,0b00000,0b00000,0b00000,0b00000,0b00000,0b00000],
+    };
+
+    const DAYS   = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+    const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+    // ─── BUILD SEVEN-SEGMENT DIGIT ────────────────────────────────────────────
+    function makeDigit() {
+      const el = document.createElement('div');
+      el.className = 'digit';
+      // segment order: top, tl, tr, mid, bl, br, bot
+      const classes = ['seg h top','seg v tl','seg v tr','seg h mid','seg v bl','seg v br','seg h bot'];
+      classes.forEach(cls => {
+        const s = document.createElement('div');
+        s.className = cls;
+        el.appendChild(s);
+      });
+      return el;
+    }
+
+    function setDigit(el, char) {
+      const bits = SEG7[char] || [0,0,0,0,0,0,0];
+      const segs = el.querySelectorAll('.seg');
+      segs.forEach((s, i) => {
+        s.classList.toggle('on', !!bits[i]);
+      });
+    }
+
+    // ─── BUILD COLON ──────────────────────────────────────────────────────────
+    function makeColon() {
+      const el = document.createElement('div');
+      el.className = 'colon';
+      el.innerHTML = '<div class="colon-dot on"></div><div class="colon-dot on"></div>';
+      return el;
+    }
+
+    // ─── BUILD DOT-MATRIX CHARACTER ──────────────────────────────────────────
+    function makeDMChar() {
+      const el = document.createElement('div');
+      el.className = 'dm-char';
+      for (let r = 0; r < 7; r++) {
+        for (let c = 0; c < 5; c++) {
+          const dot = document.createElement('div');
+          dot.className = 'dm-dot';
+          el.appendChild(dot);
+        }
+      }
+      return el;
+    }
+
+    function setDMChar(el, char) {
+      const rows = DOTMATRIX[char.toUpperCase()] || DOTMATRIX[' '];
+      const dots = el.querySelectorAll('.dm-dot');
+      let idx = 0;
+      for (let r = 0; r < 7; r++) {
+        for (let c = 4; c >= 0; c--) {
+          dots[idx++].classList.toggle('on', !!((rows[r] >> c) & 1));
+        }
+      }
+    }
+
+    // ─── INITIALISE DOM ───────────────────────────────────────────────────────
+    const timeDisplay = document.getElementById('timeDisplay');
+    const dateDisplay = document.getElementById('dateDisplay');
+
+    // Hours tens, hours units : minutes tens, minutes units
+    const digitEls = [];
+
+    function buildTimeDisplay() {
+      const g1 = document.createElement('div');
+      g1.className = 'digit-group';
+      const d0 = makeDigit(), d1 = makeDigit();
+      g1.append(d0, d1);
+      digitEls.push(d0, d1);
+
+      const colon = makeColon();
+
+      const g2 = document.createElement('div');
+      g2.className = 'digit-group';
+      const d2 = makeDigit(), d3 = makeDigit();
+      g2.append(d2, d3);
+      digitEls.push(d2, d3);
+
+      timeDisplay.append(g1, colon, g2);
+    }
+
+    // Date dot-matrix els keyed by index
+    let dmEls = [];
+    let lastDateStr = '';
+
+    function buildDateDisplay(str) {
+      dateDisplay.innerHTML = '';
+      dmEls = [];
+      for (let i = 0; i < str.length; i++) {
+        if (str[i] === ' ') {
+          const sp = document.createElement('div');
+          sp.className = 'dm-space';
+          dateDisplay.appendChild(sp);
+          dmEls.push(null);
+        } else {
+          const ch = makeDMChar();
+          setDMChar(ch, str[i]);
+          dateDisplay.appendChild(ch);
+          dmEls.push(ch);
+        }
+      }
+      lastDateStr = str;
+    }
+
+    function updateDateDisplay(str) {
+      if (str !== lastDateStr) {
+        buildDateDisplay(str);
+      }
+    }
+
+    // ─── TICK ─────────────────────────────────────────────────────────────────
+    function tick() {
+      const now = new Date();
+      const h = now.getHours();
+      const m = now.getMinutes();
+
+      const h1 = Math.floor(h / 10).toString();
+      const h2 = (h % 10).toString();
+      const m1 = Math.floor(m / 10).toString();
+      const m2 = (m % 10).toString();
+
+      setDigit(digitEls[0], h1);
+      setDigit(digitEls[1], h2);
+      setDigit(digitEls[2], m1);
+      setDigit(digitEls[3], m2);
+
+      // Date string e.g. "THU 24 SEP 2026"
+      const day   = DAYS[now.getDay()];
+      const date  = now.getDate().toString().padStart(2,'0');
+      const month = MONTHS[now.getMonth()];
+      const year  = now.getFullYear().toString();
+      const dateStr = day + ' ' + date + ' ' + month + ' ' + year;
+
+      updateDateDisplay(dateStr);
+
+      // Blink colon every second
+      const dots = document.querySelectorAll('.colon-dot');
+      const blink = now.getSeconds() % 2 === 0;
+      dots.forEach(d => d.classList.toggle('on', blink));
+    }
+
+    buildTimeDisplay();
+    buildDateDisplay('THU 01 JAN 2026'); // placeholder, replaced immediately
+    tick();
+    setInterval(tick, 500);
+  </script>
+</body>
+</html>
